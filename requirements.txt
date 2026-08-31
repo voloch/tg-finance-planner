@@ -1,0 +1,6 @@
+python-telegram-bot[job-queue]>=21.6
+openai>=1.50.0
+pydantic>=2.8
+python-dotenv>=1.0
+matplotlib>=3.9
+pytest>=8.0
