@@ -17,6 +17,21 @@ from bot.actions import command_catalog
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
+# The SDK defaults to a 10-minute timeout and 2 internal retries, which on a
+# stalled OpenRouter request means the user waits half an hour for an answer.
+# Text extraction is a small prompt against a fast model: if it hasn't come
+# back in 30s it isn't coming back. Vision passes its own longer per-request
+# timeout (see vision.py).
+REQUEST_TIMEOUT_S = 30.0
+MAX_RETRIES = 1
+
+# deepseek-v4-flash thinks by default, and on a prompt this small it burns
+# ~3000 reasoning tokens deliberating over a one-line extraction: measured
+# 101s with thinking vs 2.3s without, for a strictly worse answer ("284-150"
+# came back as 284.15 instead of 134). Every task here is schema-filling, so
+# turn it off. OpenRouter ignores this for models that don't support it.
+NO_REASONING = {"reasoning": {"enabled": False}}
+
 
 class ExpenseItem(BaseModel):
     category: Optional[str] = None
@@ -41,6 +56,8 @@ def make_client(api_key: str) -> OpenAI:
     return OpenAI(
         base_url=OPENROUTER_BASE_URL,
         api_key=api_key,
+        timeout=REQUEST_TIMEOUT_S,
+        max_retries=MAX_RETRIES,
         default_headers={
             "HTTP-Referer": "https://github.com/local/tg-finance-planner",
             "X-Title": "tg-finance-planner",
@@ -110,6 +127,7 @@ def extract(
             ],
             response_format={"type": "json_object"},
             temperature=0,
+            extra_body=NO_REASONING,
         )
         raw = resp.choices[0].message.content or ""
         try:

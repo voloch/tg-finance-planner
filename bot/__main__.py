@@ -61,7 +61,17 @@ def main() -> None:
 
     llm_client = llm.make_client(config.openrouter_token)
 
-    application = Application.builder().token(config.telegram_token).post_init(_post_init).build()
+    # concurrent_updates: without it PTB processes updates strictly one at a
+    # time, so a slow LLM call in handle_text head-of-line-blocks everything
+    # queued behind it -- a /help sent while "gastei ..." is still parsing
+    # would sit unanswered until the model replied.
+    application = (
+        Application.builder()
+        .token(config.telegram_token)
+        .post_init(_post_init)
+        .concurrent_updates(True)
+        .build()
+    )
     application.bot_data["config"] = config
     application.bot_data["conn"] = conn
     application.bot_data["llm_client"] = llm_client

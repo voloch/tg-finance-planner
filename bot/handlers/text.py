@@ -9,6 +9,7 @@ import secrets
 from datetime import date
 
 from telegram import Update
+from telegram.constants import ChatAction
 from telegram.ext import ContextTypes
 
 from bot import actions, cards, db, llm, vision
@@ -28,6 +29,17 @@ _NO_AMOUNT = {
     "pt": "Entendi a categoria mas não consegui ler um valor. Pode reformular?",
     "en": "I got the category but couldn't read an amount. Could you rephrase?",
 }
+_LLM_TIMEOUT = {
+    "pt": "⏱ O modelo demorou demais para responder. Tente de novo.",
+    "en": "⏱ The model took too long to respond. Please try again.",
+}
+
+# Hard ceiling on how long a single message can keep its handler alive. The
+# OpenAI client already times out per request (llm.REQUEST_TIMEOUT_S), but it
+# retries internally and extract() retries once more on malformed JSON, so
+# without an outer deadline the worst case is minutes.
+_TEXT_DEADLINE_S = 70
+_PHOTO_DEADLINE_S = 160
 
 
 async def _resolve_items(conn, expenses) -> list[dict]:
@@ -146,8 +158,21 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     client = context.bot_data["llm_client"]
     model = config.openrouter_model
     today_iso = date.today().isoformat()
+    # Parsing takes a couple of seconds; show "typing…" so the chat doesn't
+    # look dead while we wait.
     try:
-        result = await asyncio.to_thread(llm.extract, client, model, text, categories, today_iso)
+        await update.message.reply_chat_action(ChatAction.TYPING)
+    except Exception:  # cosmetic only -- never let it break the reply
+        pass
+    try:
+        result = await asyncio.wait_for(
+            asyncio.to_thread(llm.extract, client, model, text, categories, today_iso),
+            timeout=_TEXT_DEADLINE_S,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("LLM extraction exceeded %ss deadline", _TEXT_DEADLINE_S)
+        await update.message.reply_text(_LLM_TIMEOUT["pt"])
+        return
     except Exception:
         logger.exception("LLM extraction failed")
         await update.message.reply_text(_LLM_ERROR["pt"])
@@ -192,9 +217,16 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     model = config.openrouter_vision_model
     today_iso = date.today().isoformat()
     try:
-        result = await asyncio.to_thread(
-            vision.extract_from_photo, client, model, image_bytes, "image/jpeg", categories, today_iso
+        result = await asyncio.wait_for(
+            asyncio.to_thread(
+                vision.extract_from_photo, client, model, image_bytes, "image/jpeg", categories, today_iso
+            ),
+            timeout=_PHOTO_DEADLINE_S,
         )
+    except asyncio.TimeoutError:
+        logger.warning("Vision extraction exceeded %ss deadline", _PHOTO_DEADLINE_S)
+        await progress.edit_text(_LLM_TIMEOUT["pt"])
+        return
     except Exception:
         logger.exception("Vision extraction failed")
         await progress.edit_text("⚠️ Não consegui ler o recibo agora. Tente de novo ou digite o valor manualmente.")
