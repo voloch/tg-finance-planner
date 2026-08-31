@@ -42,9 +42,11 @@ CREATE TABLE IF NOT EXISTS expenses (
     tg_message_id  INTEGER
 );
 
--- Short-lived state for in-flight confirmation cards (kind='confirm') and
--- just-saved cards that still show an undo button (kind='saved'). A table
--- rather than an in-memory dict so a pending card survives a bot restart.
+-- Short-lived state for in-flight confirmation cards (kind='confirm'),
+-- just-saved cards that still show an undo button (kind='saved'), and
+-- in-flight non-expense command batches awaiting confirmation
+-- (kind='command', see bot/actions.py). A table rather than an in-memory
+-- dict so a pending card survives a bot restart.
 CREATE TABLE IF NOT EXISTS pending (
     token       TEXT PRIMARY KEY,
     kind        TEXT NOT NULL,

@@ -1,16 +1,18 @@
 """Inline-button handling for confirmation cards (pick category / create
-category / save / cancel / edit category) and the post-save undo button."""
+category / save / cancel / edit category), the post-save undo button, and
+running a confirmed batch of non-expense commands (see actions.py)."""
 from __future__ import annotations
 
+import io
 import logging
 import secrets
 import sqlite3
 from datetime import date
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Update
 from telegram.ext import ContextTypes
 
-from bot import cards, db, periods, reports
+from bot import actions, cards, db, periods, reports
 from bot.money import format_brl
 
 logger = logging.getLogger(__name__)
@@ -44,6 +46,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await _handle_editcat(query, conn, token=parts[1])
     elif action == "del" and len(parts) == 2:
         await _handle_delete(query, conn, token=parts[1])
+    elif action == "run" and len(parts) == 2:
+        await _handle_run(query, context, conn, token=parts[1])
     else:
         await query.answer()
         return
@@ -175,3 +179,42 @@ async def _handle_delete(query, conn, token: str) -> None:
     db.delete_expenses(conn, ids)
     db.delete_pending(conn, token)
     await query.edit_message_text("🗑 Removido.")
+
+
+async def _handle_run(query, context: ContextTypes.DEFAULT_TYPE, conn, token: str) -> None:
+    pending = db.get_pending(conn, token)
+    if not pending or pending["kind"] != "command":
+        await query.edit_message_text(_EXPIRED)
+        return
+    payload = pending["payload"]
+    calls = payload["calls"]
+    ctx = actions.ActionContext(conn=conn, user_id=pending["user_id"], chat_id=pending["chat_id"])
+
+    header = "✅ Executado:" if len(calls) == 1 else f"✅ Executados {len(calls)} comandos:"
+    result_lines = [header]
+    photos: list[bytes] = []
+    documents: list[tuple[bytes, str]] = []
+    for c in calls:
+        action_def = actions.REGISTRY.get(c["command"])
+        if action_def is None:
+            result_lines.append(f"{c['display']}\n⚠️ comando desconhecido")
+            continue
+        res = action_def.run(ctx, c["args"])
+        icon = "" if res.ok else "⚠️ "
+        block = c["display"]
+        if res.text:
+            block += f"\n{icon}{res.text}"
+        result_lines.append(block)
+        if res.photo is not None:
+            photos.append(res.photo)
+        if res.document is not None:
+            documents.append(res.document)
+
+    db.delete_pending(conn, token)
+    await query.edit_message_text("\n\n".join(result_lines))
+
+    chat_id = pending["chat_id"]
+    for png in photos:
+        await context.bot.send_photo(chat_id=chat_id, photo=InputFile(io.BytesIO(png), filename="chart.png"))
+    for data, filename in documents:
+        await context.bot.send_document(chat_id=chat_id, document=InputFile(io.BytesIO(data), filename=filename))

@@ -75,3 +75,28 @@ def render(conn, token: str, payload: dict) -> tuple[str, InlineKeyboardMarkup]:
         buttons[0].append(InlineKeyboardButton("✏️ Categoria", callback_data=f"editcat:{token}"))
     buttons.append([InlineKeyboardButton("❌ Cancelar", callback_data=f"cancel:{token}")])
     return text, InlineKeyboardMarkup(buttons)
+
+
+def render_command_card(token: str, payload: dict) -> tuple[str, InlineKeyboardMarkup]:
+    """Renders a confirmation card for one or more write commands (created by
+    bot/handlers/text.py._handle_commands). Unlike `render` above, this needs
+    no live `conn` -- the command lines and plain-language descriptions are
+    computed once at card-creation time and stored in the payload, so what
+    the user approves is exactly what gets executed."""
+    calls = payload["calls"]
+    header = "⚙️ Vou executar:" if len(calls) == 1 else f"⚙️ Vou executar {len(calls)} comandos:"
+    lines = [header, "", "\n".join(c["display"] for c in calls)]
+    descriptions = [c["describe"] for c in calls if c.get("describe")]
+    if descriptions:
+        lines.append("")
+        lines.append("\n".join(descriptions))
+    text = "\n".join(lines)
+
+    run_label = "✅ Executar" if len(calls) == 1 else "✅ Executar tudo"
+    kb = InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(run_label, callback_data=f"run:{token}")],
+            [InlineKeyboardButton("❌ Cancelar", callback_data=f"cancel:{token}")],
+        ]
+    )
+    return text, kb

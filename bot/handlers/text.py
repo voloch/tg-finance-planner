@@ -11,8 +11,7 @@ from datetime import date
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from bot import cards, db, llm, periods, reports, vision
-from bot.money import format_brl
+from bot import actions, cards, db, llm, vision
 
 logger = logging.getLogger(__name__)
 
@@ -68,18 +67,62 @@ async def _start_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE
     db.set_pending_message_id(conn, token, sent.message_id)
 
 
-async def _reply_query(update: Update, context: ContextTypes.DEFAULT_TYPE, result: llm.ExtractionResult) -> None:
+async def _handle_commands(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, result: llm.ExtractionResult
+) -> None:
+    """Dispatches one or more non-expense commands parsed from natural
+    language. Read-only commands run immediately with a `› /cmd` line shown
+    above the result; if any command in the batch writes, the whole batch is
+    shown as a single confirmation card and nothing runs until the user taps
+    ✅ (see callbacks._handle_run)."""
     conn = context.bot_data["conn"]
-    cycle_day = db.get_cycle_day(conn)
-    period = periods.period_containing(date.today(), cycle_day)
-    cat_row = None
-    if result.query and result.query.category:
-        cat_row = db.find_category(conn, result.query.category)
-    if cat_row:
-        text = reports.build_category_status_text(conn, period, cat_row)
-    else:
-        text = reports.build_status_text(conn, period)
-    await update.message.reply_text(text)
+    calls = [c for c in result.commands if c.command in actions.REGISTRY]
+    if not calls:
+        # LLM named a command that doesn't exist (or produced nothing usable)
+        await update.message.reply_text(_FALLBACK.get(result.language, _FALLBACK["pt"]))
+        return
+
+    ctx = actions.ActionContext(
+        conn=conn, user_id=update.effective_user.id, chat_id=update.effective_chat.id
+    )
+
+    for c in calls:
+        action = actions.REGISTRY[c.command]
+        if action.precheck:
+            err = action.precheck(ctx, c.args)
+            if err:
+                await update.message.reply_text(err)
+                return
+
+    any_write = any(actions.REGISTRY[c.command].is_write(c.args) for c in calls)
+
+    if not any_write:
+        for c in calls:
+            action = actions.REGISTRY[c.command]
+            res = action.run(ctx, c.args)
+            line = actions.format_command_line(c.command, c.args)
+            await actions.send_result(
+                lambda t, pm: update.message.reply_text(t, parse_mode=pm),
+                lambda f: update.message.reply_photo(photo=f),
+                lambda f: update.message.reply_document(document=f),
+                res,
+                prefix=f"› {line}",
+            )
+        return
+
+    call_payloads = []
+    for c in calls:
+        action = actions.REGISTRY[c.command]
+        line = actions.format_command_line(c.command, c.args)
+        describe = action.describe(ctx, c.args) if action.describe else ""
+        call_payloads.append({"command": c.command, "args": c.args, "display": line, "describe": describe})
+
+    token = secrets.token_hex(6)
+    payload = {"calls": call_payloads, "raw_message": update.message.text}
+    db.create_pending(conn, token, "command", update.effective_chat.id, update.effective_user.id, payload)
+    text, kb = cards.render_command_card(token, payload)
+    sent = await update.message.reply_text(text, reply_markup=kb)
+    db.set_pending_message_id(conn, token, sent.message_id)
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -110,8 +153,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text(_LLM_ERROR["pt"])
         return
 
-    if result.intent == "query":
-        await _reply_query(update, context, result)
+    if result.intent == "command":
+        await _handle_commands(update, context, result)
         return
 
     if result.intent != "log_expense" or not result.expenses:
