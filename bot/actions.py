@@ -97,6 +97,9 @@ Fale comigo naturalmente para lançar gastos, em português ou inglês:
 
 Vou confirmar antes de salvar qualquer coisa. Também aceito fotos de recibo.
 
+O resumo do período fica fixado no topo do chat e se atualiza sozinho a cada
+mudança, então é só abrir a conversa para ver como está o orçamento.
+
 Também posso criar/editar categorias, orçamentos e o dia de reinício -- é só pedir
 ("cria uma categoria Netflix de 55", "muda o dia pro 5"). Sempre confirmo antes de
 executar qualquer alteração.
@@ -116,6 +119,7 @@ executar qualquer alteração.
 /report — resumo + gráfico do período atual
 /export — exporta o período atual em CSV
 /cycleday [N] — mostra ou define o dia do mês em que o orçamento reinicia
+/pin — refixa o resumo no topo do chat, se ele sumir
 /whoami — mostra seu ID do Telegram (para configurar ALLOWED_USER_IDS)
 """
 

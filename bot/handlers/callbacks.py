@@ -12,7 +12,7 @@ from datetime import date
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Update
 from telegram.ext import ContextTypes
 
-from bot import actions, cards, db, periods, reports
+from bot import actions, cards, db, livestatus, periods, reports
 from bot.money import format_brl
 
 logger = logging.getLogger(__name__)
@@ -39,13 +39,13 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     elif action == "create" and len(parts) == 2:
         await _handle_create(query, conn, token=parts[1])
     elif action == "save" and len(parts) == 2:
-        await _handle_save(query, conn, token=parts[1])
+        await _handle_save(query, context, conn, token=parts[1])
     elif action == "cancel" and len(parts) == 2:
         await _handle_cancel(query, conn, token=parts[1])
     elif action == "editcat" and len(parts) == 2:
         await _handle_editcat(query, conn, token=parts[1])
     elif action == "del" and len(parts) == 2:
-        await _handle_delete(query, conn, token=parts[1])
+        await _handle_delete(query, context, conn, token=parts[1])
     elif action == "run" and len(parts) == 2:
         await _handle_run(query, context, conn, token=parts[1])
     else:
@@ -120,7 +120,7 @@ async def _handle_cancel(query, conn, token: str) -> None:
     await query.edit_message_text("❌ Cancelado.")
 
 
-async def _handle_save(query, conn, token: str) -> None:
+async def _handle_save(query, context: ContextTypes.DEFAULT_TYPE, conn, token: str) -> None:
     pending = db.get_pending(conn, token)
     if not pending or pending["kind"] != "confirm":
         await query.edit_message_text(_EXPIRED)
@@ -168,9 +168,10 @@ async def _handle_save(query, conn, token: str) -> None:
     text = "\n".join(lines)
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("🗑 Apagar", callback_data=f"del:{save_token}")]])
     await query.edit_message_text(text, reply_markup=kb)
+    await livestatus.refresh(context.bot, conn, pending["chat_id"])
 
 
-async def _handle_delete(query, conn, token: str) -> None:
+async def _handle_delete(query, context: ContextTypes.DEFAULT_TYPE, conn, token: str) -> None:
     pending = db.get_pending(conn, token)
     if not pending or pending["kind"] != "saved":
         await query.edit_message_text("Já processado.")
@@ -179,6 +180,7 @@ async def _handle_delete(query, conn, token: str) -> None:
     db.delete_expenses(conn, ids)
     db.delete_pending(conn, token)
     await query.edit_message_text("🗑 Removido.")
+    await livestatus.refresh(context.bot, conn, pending["chat_id"])
 
 
 async def _handle_run(query, context: ContextTypes.DEFAULT_TYPE, conn, token: str) -> None:
@@ -218,3 +220,5 @@ async def _handle_run(query, context: ContextTypes.DEFAULT_TYPE, conn, token: st
         await context.bot.send_photo(chat_id=chat_id, photo=InputFile(io.BytesIO(png), filename="chart.png"))
     for data, filename in documents:
         await context.bot.send_document(chat_id=chat_id, document=InputFile(io.BytesIO(data), filename=filename))
+
+    await livestatus.refresh(context.bot, conn, chat_id)

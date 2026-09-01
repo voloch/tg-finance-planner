@@ -37,6 +37,7 @@ COMMANDS = [
     BotCommand("report", "Relatório completo"),
     BotCommand("export", "Exportar CSV"),
     BotCommand("cycleday", "Configurar dia de reinício"),
+    BotCommand("pin", "Fixar o resumo no topo do chat"),
     BotCommand("whoami", "Meu ID do Telegram"),
 ]
 
@@ -75,10 +76,12 @@ def main() -> None:
     application.bot_data["config"] = config
     application.bot_data["conn"] = conn
     application.bot_data["llm_client"] = llm_client
+    application.bot_data["llm_extra"] = llm.request_options(config.openrouter_ignore_providers)
 
     application.add_handler(CommandHandler("start", commands.start))
     application.add_handler(CommandHandler("help", commands.help_cmd))
     application.add_handler(CommandHandler("whoami", commands.whoami))
+    application.add_handler(CommandHandler("pin", commands.pin))
     application.add_handler(CommandHandler("newcat", commands.newcat))
     application.add_handler(CommandHandler("addalias", commands.addalias))
     application.add_handler(CommandHandler("budget", commands.budget))

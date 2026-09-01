@@ -36,8 +36,8 @@ _LLM_TIMEOUT = {
 
 # Hard ceiling on how long a single message can keep its handler alive. The
 # OpenAI client already times out per request (llm.REQUEST_TIMEOUT_S), but it
-# retries internally and extract() retries once more on malformed JSON, so
-# without an outer deadline the worst case is minutes.
+# retries internally and extract() makes up to llm.ATTEMPTS draws to get
+# past a bad provider, so without an outer deadline the worst case is minutes.
 _TEXT_DEADLINE_S = 70
 _PHOTO_DEADLINE_S = 160
 
@@ -166,7 +166,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         pass
     try:
         result = await asyncio.wait_for(
-            asyncio.to_thread(llm.extract, client, model, text, categories, today_iso),
+            asyncio.to_thread(
+                llm.extract, client, model, text, categories, today_iso,
+                context.bot_data.get("llm_extra"),
+            ),
             timeout=_TEXT_DEADLINE_S,
         )
     except asyncio.TimeoutError:
@@ -219,7 +222,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     try:
         result = await asyncio.wait_for(
             asyncio.to_thread(
-                vision.extract_from_photo, client, model, image_bytes, "image/jpeg", categories, today_iso
+                vision.extract_from_photo, client, model, image_bytes, "image/jpeg", categories,
+                today_iso, context.bot_data.get("llm_extra"),
             ),
             timeout=_PHOTO_DEADLINE_S,
         )

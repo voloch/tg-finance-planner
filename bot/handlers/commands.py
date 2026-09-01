@@ -12,7 +12,7 @@ from __future__ import annotations
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from bot import actions, db
+from bot import actions, db, livestatus
 
 HELP_TEXT = actions.HELP_TEXT
 
@@ -43,8 +43,11 @@ async def _dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, name: st
     ctx = actions.ActionContext(
         conn=conn, user_id=update.effective_user.id, chat_id=update.effective_chat.id
     )
-    result = actions.REGISTRY[name].run(ctx, args)
+    action = actions.REGISTRY[name]
+    result = action.run(ctx, args)
     await _send(update, result)
+    if result.ok and action.is_write(args):
+        await livestatus.refresh(context.bot, conn, update.effective_chat.id)
 
 
 # --------------------------------------------------------------- commands --
@@ -55,6 +58,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
         "👋 Oi! Eu sou seu assistente de finanças.\n\n" + actions.HELP_TEXT, parse_mode="Markdown"
     )
+    await livestatus.refresh(context.bot, context.bot_data["conn"], update.effective_chat.id)
+
+
+async def pin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Re-creates the pinned status message, for when it's been unpinned or
+    deleted by hand."""
+    if not await _guard(update, context):
+        return
+    conn = context.bot_data["conn"]
+    db.set_setting(conn, "status_message_id", "")
+    await livestatus.refresh(context.bot, conn, update.effective_chat.id)
 
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

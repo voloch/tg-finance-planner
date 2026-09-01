@@ -9,7 +9,7 @@ import json
 from openai import OpenAI
 from pydantic import ValidationError
 
-from bot.llm import NO_REASONING, ExtractionResult
+from bot.llm import ExtractionResult, request_options
 
 # Uploading a base64 photo and OCRing it is slower than plain text extraction,
 # so this overrides the shorter client-wide timeout set in llm.make_client.
@@ -41,6 +41,7 @@ def extract_from_photo(
     mime_type: str,
     categories: list[dict],
     today_iso: str,
+    extra_body: dict | None = None,
 ) -> ExtractionResult:
     b64 = base64.b64encode(image_bytes).decode("ascii")
     cat_lines = "\n".join(
@@ -64,7 +65,7 @@ def extract_from_photo(
         response_format={"type": "json_object"},
         temperature=0,
         timeout=VISION_TIMEOUT_S,  # overrides the client-wide text timeout
-        extra_body=NO_REASONING,
+        extra_body=extra_body if extra_body is not None else request_options(),
     )
     raw = resp.choices[0].message.content or ""
     try:

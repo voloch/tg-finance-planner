@@ -28,6 +28,7 @@ class Config:
     openrouter_token: str
     openrouter_model: str
     openrouter_vision_model: str
+    openrouter_ignore_providers: list[str] = field(default_factory=list)
     allowed_user_ids: set[int] = field(default_factory=set)
     tz_name: str = "America/Sao_Paulo"
     db_path: Path = PROJECT_ROOT / "data" / "finance.db"
@@ -63,6 +64,12 @@ def load_config() -> Config:
         "OPENROUTER_VISION_MODEL", "deepseek/deepseek-v4-flash-vision-exp"
     )
 
+    # Providers observed returning word-salad JSON for this model. Kept in
+    # config so a bad provider can be routed around by editing .env instead
+    # of shipping code.
+    ignore_raw = os.environ.get("OPENROUTER_IGNORE_PROVIDERS", "DigitalOcean").strip()
+    ignore_providers = [x.strip() for x in ignore_raw.split(",") if x.strip()]
+
     allowed_raw = os.environ.get("ALLOWED_USER_IDS", "").strip()
     allowed_user_ids = {int(x) for x in allowed_raw.split(",") if x.strip()} if allowed_raw else set()
     if not allowed_user_ids:
@@ -80,6 +87,7 @@ def load_config() -> Config:
         openrouter_token=openrouter_token,
         openrouter_model=openrouter_model,
         openrouter_vision_model=openrouter_vision_model,
+        openrouter_ignore_providers=ignore_providers,
         allowed_user_ids=allowed_user_ids,
         tz_name=tz_name,
         db_path=db_path,

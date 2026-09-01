@@ -10,7 +10,7 @@ from datetime import date, timedelta
 from telegram import InputFile
 from telegram.ext import ContextTypes
 
-from bot import charts, db, periods, reports
+from bot import charts, db, livestatus, periods, reports
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +54,12 @@ async def daily_check(context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     db.set_setting(conn, "last_report_date", today.isoformat())
+    await livestatus.refresh(context.bot, conn, home_chat_id)
 
 
 async def cleanup_job(context: ContextTypes.DEFAULT_TYPE) -> None:
-    db.cleanup_old_pending(context.bot_data["conn"])
+    conn = context.bot_data["conn"]
+    db.cleanup_old_pending(conn)
+    # Nothing may have been written for days, but the period label and the
+    # "atualizado" stamp still go stale, so refresh the pin on this tick too.
+    await livestatus.refresh(context.bot, conn)
